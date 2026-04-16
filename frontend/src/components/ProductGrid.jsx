@@ -2,14 +2,11 @@ import ProductCard from '@/components/ProductCard';
 import SkeletonCard from '@/components/SkeletonCard';
 import { PackageOpen } from 'lucide-react';
 
-export default function ProductGrid({ products, isLoading, onProductClick }) {
+export default function ProductGrid({ products, isLoading, onProductClick, category }) {
   if (isLoading) {
     return (
-      <div
-        data-testid="skeleton-grid"
-        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5"
-      >
-        {Array.from({ length: 9 }).map((_, i) => (
+      <div data-testid="skeleton-grid" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+        {Array.from({ length: 12 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
       </div>
@@ -18,32 +15,25 @@ export default function ProductGrid({ products, isLoading, onProductClick }) {
 
   if (products.length === 0) {
     return (
-      <div
-        data-testid="empty-state"
-        className="flex flex-col items-center justify-center py-24 text-center"
-      >
+      <div data-testid="empty-state" className="flex flex-col items-center justify-center py-24 text-center">
         <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-white/5 flex items-center justify-center mb-4">
           <PackageOpen className="w-8 h-8 text-zinc-600" />
         </div>
         <h3 className="text-lg font-heading font-semibold text-white">No accounts found</h3>
-        <p className="text-sm text-zinc-500 mt-1 max-w-xs">
-          Try adjusting your filters or search query to find what you're looking for.
-        </p>
+        <p className="text-sm text-zinc-500 mt-1 max-w-xs">Try adjusting your filters or search query.</p>
       </div>
     );
   }
 
   return (
-    <div
-      data-testid="product-grid"
-      className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5"
-    >
+    <div data-testid="product-grid" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
       {products.map((product, index) => (
         <ProductCard
           key={product.item_id}
           product={product}
           onClick={onProductClick}
           index={index}
+          category={category}
         />
       ))}
     </div>
