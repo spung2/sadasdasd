@@ -9,6 +9,7 @@ import httpx
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, parse_qs
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -42,7 +43,7 @@ DEFAULT_SETTINGS = {
     "admin_email": ADMIN_EMAIL,
 }
 
-# ======================== AUTH ========================
+# ======================== HELPERS ========================
 
 async def get_settings():
     s = await db.admin_settings.find_one({"settings_id": "global"}, {"_id": 0})
@@ -50,6 +51,26 @@ async def get_settings():
         await db.admin_settings.insert_one(dict(DEFAULT_SETTINGS))
         return dict(DEFAULT_SETTINGS)
     return s
+
+def parse_lzt_url(url_str: str) -> dict:
+    """Parse an LZT Market URL and extract the API path + query params."""
+    parsed = urlparse(url_str)
+    path = parsed.path.rstrip('/')
+    # LZT URLs: https://lzt.market/riot?... or https://lzt.market/steam?...
+    # API base path mapping
+    api_path = path if path else '/riot'
+    # Parse query params — parse_qs returns lists, flatten single values
+    raw_params = parse_qs(parsed.query, keep_blank_values=False)
+    params = {}
+    for k, v in raw_params.items():
+        # Keep array params as repeated key-value pairs
+        if len(v) == 1:
+            params[k] = v[0]
+        else:
+            params[k] = v  # keep as list for array params
+    return {"api_path": api_path, "params": params}
+
+# ======================== AUTH ========================
 
 @api_router.post("/auth/session")
 async def exchange_session(request: Request, response: Response):
@@ -62,98 +83,65 @@ async def exchange_session(request: Request, response: Response):
     if ar.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid session")
     ad = ar.json()
-    email = ad.get("email")
-    name = ad.get("name", "")
-    picture = ad.get("picture", "")
-    session_token = ad.get("session_token", "")
-
+    email, name, picture, session_token = ad.get("email"), ad.get("name",""), ad.get("picture",""), ad.get("session_token","")
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         user_id = existing["user_id"]
         await db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture}})
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
-            "user_id": user_id, "email": email, "name": name,
-            "picture": picture, "created_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    # Auto-set first real user as admin if no admin_email is set
+        await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture, "created_at": datetime.now(timezone.utc).isoformat()})
     settings = await get_settings()
-    if not settings.get("admin_email"):
-        await db.admin_settings.update_one(
-            {"settings_id": "global"}, {"$set": {"admin_email": email}}, upsert=True
-        )
-
-    # Clean old sessions for this user, then create new one
+    current_admin = settings.get("admin_email", "")
+    if not current_admin:
+        await db.admin_settings.update_one({"settings_id": "global"}, {"$set": {"admin_email": email}}, upsert=True)
+    elif current_admin:
+        admin_exists = await db.users.find_one({"email": current_admin}, {"_id": 0})
+        if not admin_exists:
+            await db.admin_settings.update_one({"settings_id": "global"}, {"$set": {"admin_email": email}}, upsert=True)
     await db.user_sessions.delete_many({"user_id": user_id})
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.insert_one({
-        "user_id": user_id, "session_token": session_token,
-        "expires_at": expires_at.isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-
-    # Set cookie - samesite=none + secure for cross-origin HTTPS
-    response.set_cookie(
-        key="session_token", value=session_token,
-        httponly=True, secure=True, samesite="none",
-        path="/", max_age=7 * 24 * 3600
-    )
-
-    # Return user WITH is_admin flag immediately
+    await db.user_sessions.insert_one({"user_id": user_id, "session_token": session_token, "expires_at": expires_at.isoformat(), "created_at": datetime.now(timezone.utc).isoformat()})
+    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="none", path="/", max_age=7*24*3600)
     settings = await get_settings()
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     user["is_admin"] = (user.get("email") == settings.get("admin_email"))
     return user
 
-
 async def get_current_user(request: Request) -> Optional[dict]:
     token = request.cookies.get("session_token")
     if not token:
         ah = request.headers.get("Authorization", "")
-        if ah.startswith("Bearer "):
-            token = ah[7:]
-    if not token:
-        return None
+        if ah.startswith("Bearer "): token = ah[7:]
+    if not token: return None
     session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if not session:
-        return None
+    if not session: return None
     ea = session.get("expires_at", "")
-    if isinstance(ea, str):
-        ea = datetime.fromisoformat(ea)
-    if ea.tzinfo is None:
-        ea = ea.replace(tzinfo=timezone.utc)
-    if ea < datetime.now(timezone.utc):
-        return None
+    if isinstance(ea, str): ea = datetime.fromisoformat(ea)
+    if ea.tzinfo is None: ea = ea.replace(tzinfo=timezone.utc)
+    if ea < datetime.now(timezone.utc): return None
     return await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-
 
 @api_router.get("/auth/me")
 async def get_me(request: Request):
     user = await get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user: raise HTTPException(status_code=401, detail="Not authenticated")
     settings = await get_settings()
     user["is_admin"] = (user.get("email") == settings.get("admin_email"))
     return user
 
-
 @api_router.post("/auth/logout")
 async def logout_user(request: Request, response: Response):
     token = request.cookies.get("session_token")
-    if token:
-        await db.user_sessions.delete_one({"session_token": token})
+    if token: await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie(key="session_token", path="/", samesite="none", secure=True, httponly=True)
     return {"message": "Logged out"}
-
 
 # ======================== ADMIN SETTINGS ========================
 
 async def check_admin(request: Request):
     user = await get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user: raise HTTPException(status_code=401, detail="Not authenticated")
     settings = await get_settings()
     if user.get("email") != settings.get("admin_email"):
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -169,41 +157,126 @@ async def update_admin_settings(request: Request):
     await check_admin(request)
     body = await request.json()
     update = {}
-    if "default_region" in body: update["default_region"] = body["default_region"]
-    if "commission" in body: update["commission"] = body["commission"]
-    if "admin_email" in body: update["admin_email"] = body["admin_email"]
+    for k in ("default_region", "commission", "admin_email"):
+        if k in body: update[k] = body[k]
     if update:
         await db.admin_settings.update_one({"settings_id": "global"}, {"$set": update}, upsert=True)
     return await get_settings()
 
-# ======================== FETCH SETTINGS ========================
+# ======================== URL PROFILES ========================
 
-DEFAULT_FETCH_SETTINGS = {
-    "settings_id": "fetch_config",
-    "general": {"pmin":"","pmax":"","title":"","origin":[],"country":"","not_country":"","daybreak":"","email":"nomatter","tel":"nomatter","email_type":[],"item_domain":"","not_item_domain":"","email_provider":"","not_email_provider":"","nsb":False,"sb":False,"nsb_by_me":False,"sb_by_me":False},
-    "valorant": {"weaponSkin":"","knife":False,"valorant_knife_min":"","valorant_knife_max":"","buddy":"","agent":"","valorant_region":[],"valorant_not_region":"","rmin":"","rmax":"","previous_rmin":"","previous_rmax":"","last_rmin":"","last_rmax":"","valorant_smin":"","valorant_smax":"","valorant_level_min":"","valorant_level_max":"","vp_min":"","vp_max":"","inv_min":"","inv_max":"","amin":"","amax":""},
-    "lol": {"skin":"","champion":"","lol_region":[],"lol_not_region":"","lol_level_min":"","lol_level_max":"","win_rate_min":"","win_rate_max":"","lol_smin":"","lol_smax":"","champion_min":"","champion_max":"","blue_min":"","blue_max":"","orange_min":"","orange_max":"","mythic_min":"","mythic_max":"","riot_min":"","riot_max":""},
-}
+@api_router.get("/profiles")
+async def list_profiles():
+    """Public endpoint — returns all fetch profiles for frontend sub-categories."""
+    cursor = db.profiles.find({}, {"_id": 0}).sort("created_at", 1)
+    profiles = await cursor.to_list(length=100)
+    return {"profiles": profiles}
 
-@api_router.get("/admin/fetch-settings")
-async def get_fetch_settings(request: Request):
+@api_router.post("/profiles")
+async def create_profile(request: Request):
     await check_admin(request)
-    doc = await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
-    if not doc:
-        await db.fetch_settings.insert_one(dict(DEFAULT_FETCH_SETTINGS))
-        return dict(DEFAULT_FETCH_SETTINGS)
+    body = await request.json()
+    name = body.get("name", "").strip()
+    category = body.get("category", "").strip()
+    lzt_url = body.get("lzt_url", "").strip()
+    if not name or not category or not lzt_url:
+        raise HTTPException(status_code=400, detail="name, category, lzt_url required")
+    if category not in ("valorant", "lol"):
+        raise HTTPException(status_code=400, detail="category must be 'valorant' or 'lol'")
+    parsed = parse_lzt_url(lzt_url)
+    profile_id = f"prof_{uuid.uuid4().hex[:10]}"
+    doc = {
+        "profile_id": profile_id,
+        "name": name,
+        "category": category,
+        "lzt_url": lzt_url,
+        "api_path": parsed["api_path"],
+        "parsed_params": parsed["params"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.profiles.insert_one(doc)
+    doc.pop("_id", None)
     return doc
 
-@api_router.put("/admin/fetch-settings")
-async def update_fetch_settings(request: Request):
+@api_router.put("/profiles/{profile_id}")
+async def update_profile(profile_id: str, request: Request):
     await check_admin(request)
     body = await request.json()
     update = {}
-    for k in ("general", "valorant", "lol"):
-        if k in body: update[k] = body[k]
-    if update:
-        await db.fetch_settings.update_one({"settings_id": "fetch_config"}, {"$set": update}, upsert=True)
-    return await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
+    if "name" in body: update["name"] = body["name"].strip()
+    if "category" in body:
+        if body["category"] not in ("valorant", "lol"):
+            raise HTTPException(status_code=400, detail="category must be 'valorant' or 'lol'")
+        update["category"] = body["category"]
+    if "lzt_url" in body:
+        parsed = parse_lzt_url(body["lzt_url"].strip())
+        update["lzt_url"] = body["lzt_url"].strip()
+        update["api_path"] = parsed["api_path"]
+        update["parsed_params"] = parsed["params"]
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    result = await db.profiles.update_one({"profile_id": profile_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    doc = await db.profiles.find_one({"profile_id": profile_id}, {"_id": 0})
+    return doc
+
+@api_router.delete("/profiles/{profile_id}")
+async def delete_profile(profile_id: str, request: Request):
+    await check_admin(request)
+    result = await db.profiles.delete_one({"profile_id": profile_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"message": "Deleted", "profile_id": profile_id}
+
+@api_router.get("/market/profile/{profile_id}")
+async def search_by_profile(profile_id: str, request: Request):
+    """Fetch LZT data using a saved profile's parsed params."""
+    profile = await db.profiles.find_one({"profile_id": profile_id}, {"_id": 0})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    settings = await get_settings()
+    category = profile["category"]
+    # Merge profile params with request query params (page, currency overrides)
+    params = dict(profile.get("parsed_params", {}))
+    for k, v in request.query_params.items():
+        params[k] = v
+    if "currency" not in params:
+        params["currency"] = "usd"
+    cache_key = f"profile:{profile_id}:{str(sorted(str(params).encode()))}"
+    cached = await db.lzt_cache.find_one({"cache_key": cache_key}, {"_id": 0})
+    if cached and cached.get("data"):
+        result = apply_commission(cached["data"], category, settings)
+        result["profile"] = profile
+        return result
+    api_path = profile.get("api_path", "/riot")
+    url = f"{LZT_BASE_URL}{api_path}"
+    # Flatten list params for httpx
+    flat_params = []
+    for k, v in params.items():
+        if isinstance(v, list):
+            for item in v:
+                flat_params.append((k, item))
+        else:
+            flat_params.append((k, v))
+    logger.info(f"LZT Profile fetch: {url} params={flat_params[:10]}...")
+    try:
+        resp = await http_client.get(url, params=flat_params)
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"LZT API error: {e.response.status_code}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"LZT API error")
+    except Exception as e:
+        logger.error(f"LZT error: {e}")
+        raise HTTPException(status_code=502, detail=f"LZT API error: {str(e)}")
+    try:
+        ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SEARCH)
+        await db.lzt_cache.update_one({"cache_key": cache_key}, {"$set": {"cache_key": cache_key, "data": data, "expires_at": ea}}, upsert=True)
+    except: pass
+    result = apply_commission(data, category, settings)
+    result["profile"] = profile
+    return result
 
 # ======================== FAVORITES ========================
 
@@ -261,14 +334,7 @@ async def get_valorant_skins():
         skins = []
         for s in raw.get("data", []):
             if not s.get("displayIcon"): continue
-            skins.append({
-                "uuid": s["uuid"],
-                "displayName": s["displayName"],
-                "displayIcon": s["displayIcon"],
-                "contentTierUuid": s.get("contentTierUuid"),
-                "tier": tiers_data.get(s.get("contentTierUuid"), {}).get("name", "Standard"),
-                "tierColor": tiers_data.get(s.get("contentTierUuid"), {}).get("color"),
-            })
+            skins.append({"uuid": s["uuid"], "displayName": s["displayName"], "displayIcon": s["displayIcon"], "contentTierUuid": s.get("contentTierUuid"), "tier": tiers_data.get(s.get("contentTierUuid"), {}).get("name", "Standard"), "tierColor": tiers_data.get(s.get("contentTierUuid"), {}).get("color")})
         result = {"skins": skins, "tiers": tiers_data}
         ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SKINS)
         await db.lzt_cache.update_one({"cache_key": "valorant_skins_all"}, {"$set": {"cache_key": "valorant_skins_all", "data": result, "expires_at": ea}}, upsert=True)
@@ -277,53 +343,34 @@ async def get_valorant_skins():
         logger.error(f"Valorant API error: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch Valorant skin data")
 
-# ======================== LZT MARKET ========================
-
-SUPPORTED_CATEGORIES = {"valorant": "/riot", "lol": "/riot"}
-
-@api_router.get("/market/categories")
-async def get_categories():
-    return {"categories": [
-        {"id": "valorant", "name": "Valorant", "path": "/riot"},
-        {"id": "lol", "name": "League of Legends", "path": "/riot"},
-    ]}
-
-async def ensure_cache_indexes():
-    try: await db.lzt_cache.create_index("expires_at", expireAfterSeconds=0)
-    except: pass
+# ======================== LZT MARKET (generic fallback) ========================
 
 @api_router.get("/market/search/{category}")
 async def search_market(category: str, request: Request):
-    if category not in SUPPORTED_CATEGORIES:
+    if category not in ("valorant", "lol"):
         raise HTTPException(status_code=400, detail=f"Unsupported category: {category}")
     settings = await get_settings()
     params = dict(request.query_params)
-    if "currency" not in params:
-        params["currency"] = "usd"
+    if "currency" not in params: params["currency"] = "usd"
     cache_key = f"search:{category}:{str(sorted(params.items()))}"
     cached = await db.lzt_cache.find_one({"cache_key": cache_key}, {"_id": 0})
     if cached and cached.get("data"):
         result = apply_commission(cached["data"], category, settings)
         result["default_region"] = settings.get("default_region", "all")
         return result
-    api_path = SUPPORTED_CATEGORIES[category]
-    url = f"{LZT_BASE_URL}{api_path}"
-    logger.info(f"LZT API: {url} params={params}")
+    url = f"{LZT_BASE_URL}/riot"
     try:
         resp = await http_client.get(url, params=params)
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as e:
-        logger.error(f"LZT API error: {e.response.status_code}")
         raise HTTPException(status_code=e.response.status_code, detail=f"LZT API error: {e.response.status_code}")
     except Exception as e:
-        logger.error(f"LZT connection error: {e}")
         raise HTTPException(status_code=502, detail=f"LZT API error: {str(e)}")
     try:
         ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SEARCH)
         await db.lzt_cache.update_one({"cache_key": cache_key}, {"$set": {"cache_key": cache_key, "data": data, "expires_at": ea}}, upsert=True)
-    except Exception as e:
-        logger.warning(f"Cache write fail: {e}")
+    except: pass
     result = apply_commission(data, category, settings)
     result["default_region"] = settings.get("default_region", "all")
     return result
@@ -377,6 +424,10 @@ async def startup():
     await ensure_cache_indexes()
     await get_settings()
     logger.info("LZT Vault API started")
+
+async def ensure_cache_indexes():
+    try: await db.lzt_cache.create_index("expires_at", expireAfterSeconds=0)
+    except: pass
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
