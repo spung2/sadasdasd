@@ -40,6 +40,16 @@ export async function updateAdminSettings(data) {
   if (!resp.ok) throw new Error(`Error: ${resp.status}`);
   return resp.json();
 }
+export async function fetchFetchSettings() {
+  const resp = await fetch(`${API}/admin/fetch-settings`, { credentials: 'include' });
+  if (!resp.ok) throw new Error(`Error: ${resp.status}`);
+  return resp.json();
+}
+export async function updateFetchSettings(data) {
+  const resp = await fetch(`${API}/admin/fetch-settings`, { method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(data) });
+  if (!resp.ok) throw new Error(`Error: ${resp.status}`);
+  return resp.json();
+}
 
 // ==================== FAVORITES ====================
 const FAV_KEY = 'lzt_vault_favorites';

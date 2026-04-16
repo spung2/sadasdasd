@@ -136,6 +136,74 @@ async def update_admin_settings(request: Request):
         await db.admin_settings.update_one({"settings_id": "global"}, {"$set": update}, upsert=True)
     return await get_settings()
 
+
+# ======================== FETCH SETTINGS (Sync Engine Config) ========================
+
+DEFAULT_FETCH_SETTINGS = {
+    "settings_id": "fetch_config",
+    "general": {
+        "pmin": "", "pmax": "", "title": "",
+        "origin": [], "country": "", "not_country": "",
+        "daybreak": "", "email": "nomatter", "tel": "nomatter",
+        "email_type": [], "item_domain": "", "not_item_domain": "",
+        "email_provider": "", "not_email_provider": "",
+        "nsb": False, "sb": False, "nsb_by_me": False, "sb_by_me": False,
+    },
+    "valorant": {
+        "weaponSkin": "", "knife": False,
+        "valorant_knife_min": "", "valorant_knife_max": "",
+        "buddy": "", "agent": "",
+        "valorant_region": [], "valorant_not_region": "",
+        "rmin": "", "rmax": "",
+        "previous_rmin": "", "previous_rmax": "",
+        "last_rmin": "", "last_rmax": "",
+        "valorant_smin": "", "valorant_smax": "",
+        "valorant_level_min": "", "valorant_level_max": "",
+        "vp_min": "", "vp_max": "",
+        "inv_min": "", "inv_max": "",
+        "amin": "", "amax": "",
+    },
+    "lol": {
+        "skin": "", "champion": "",
+        "lol_region": [], "lol_not_region": "",
+        "lol_level_min": "", "lol_level_max": "",
+        "win_rate_min": "", "win_rate_max": "",
+        "lol_smin": "", "lol_smax": "",
+        "champion_min": "", "champion_max": "",
+        "blue_min": "", "blue_max": "",
+        "orange_min": "", "orange_max": "",
+        "mythic_min": "", "mythic_max": "",
+        "riot_min": "", "riot_max": "",
+    },
+}
+
+@api_router.get("/admin/fetch-settings")
+async def get_fetch_settings(request: Request):
+    await check_admin(request)
+    doc = await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
+    if not doc:
+        await db.fetch_settings.insert_one(dict(DEFAULT_FETCH_SETTINGS))
+        return dict(DEFAULT_FETCH_SETTINGS)
+    return doc
+
+@api_router.put("/admin/fetch-settings")
+async def update_fetch_settings(request: Request):
+    await check_admin(request)
+    body = await request.json()
+    update = {}
+    if "general" in body: update["general"] = body["general"]
+    if "valorant" in body: update["valorant"] = body["valorant"]
+    if "lol" in body: update["lol"] = body["lol"]
+    if update:
+        await db.fetch_settings.update_one(
+            {"settings_id": "fetch_config"},
+            {"$set": update},
+            upsert=True
+        )
+    doc = await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
+    return doc
+
+
 # ======================== FAVORITES ========================
 
 @api_router.get("/favorites")

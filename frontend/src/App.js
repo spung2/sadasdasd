@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Dashboard from "@/components/Dashboard";
 import AuthCallback from "@/components/AuthCallback";
 import AdminDashboard from "@/components/AdminDashboard";
+import AdminSyncSettings from "@/components/AdminSyncSettings";
 
 function AppRouter() {
   const location = useLocation();
@@ -11,6 +12,7 @@ function AppRouter() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/admin" element={<AdminDashboard />} />
+      <Route path="/admin/sync-settings" element={<AdminSyncSettings />} />
     </Routes>
   );
 }
