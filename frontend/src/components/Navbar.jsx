@@ -18,7 +18,7 @@ export default function Navbar({ user, setUser }) {
             <Crosshair className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-heading font-bold text-white tracking-tight leading-none">LZT <span className="text-valorant">Vault</span></h1>
+            <h1 className="text-lg font-heading font-bold text-white tracking-tight leading-none">Game <span className="text-valorant">Vault</span></h1>
             <p className="text-[10px] font-body text-zinc-500 tracking-[0.15em] uppercase">Premium Accounts</p>
           </div>
         </div>
@@ -27,10 +27,13 @@ export default function Navbar({ user, setUser }) {
           {user?.is_admin && <button data-testid="nav-admin" onClick={() => navigate('/admin')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]"><Settings className="w-4 h-4" />Admin</button>}
         </div>
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/60 border border-white/5">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-zinc-400 font-body">Live API</span>
-          </div>
+          {/* Live API indicator — admin only */}
+          {user?.is_admin && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/60 border border-white/5">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs text-zinc-400 font-body">Live API</span>
+            </div>
+          )}
           {user ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900/60 border border-white/5">

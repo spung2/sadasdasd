@@ -219,7 +219,7 @@ export default function LztPreviewModal({ product, category, onClose }) {
           </div>
 
           <div className="p-6 space-y-6">
-            {/* Buy + Tracker buttons — NO "View on LZT" */}
+            {/* Buy + Tracker buttons */}
             <div className="flex flex-col sm:flex-row gap-3">
               <button data-testid="buy-now-btn" className="flex-1 py-3.5 bg-valorant text-white font-heading font-bold text-sm uppercase tracking-widest rounded-lg text-center hover:bg-valorant-hover animate-neon-pulse transition-all">
                 Buy Now - {cs}{item.price?.toFixed?.(2)}
