@@ -2,27 +2,23 @@
 
 ## Architecture
 - Frontend: React + Tailwind + Framer Motion | Backend: FastAPI + MongoDB
-- Auth: Emergent Google OAuth | External: LZT Market API, Valorant-API.com
-
-## Routes
-- / → Landing page | /market → Marketplace | /admin → Admin panel
-
-## URL Profile System (NEW)
-- Admin pastes LZT Market URLs in admin panel
-- Backend parses URL params (urllib.parse), saves as profile
-- Profiles appear as clickable sub-category tabs on marketplace
-- GET /api/market/profile/{id} fetches using saved params
-- Public GET /api/profiles, Admin POST/PUT/DELETE
+- Auth: Emergent Google OAuth | External: LZT Market API, Valorant-API.com, DataDragon
 
 ## All Features
-- Landing page with hero, features, CTAs
-- Marketplace: Valorant + LoL with profile sub-tabs
-- Real skin inventory (UUID matching from valorant-api.com)
-- LoL dynamic display (rank, champions, essences)
-- Commission markup (configurable per-category)
-- Account comparison (2 side-by-side)
-- Favorites (localStorage + MongoDB sync)
-- Pagination, search, advanced filters
-- Admin: profile management, region, commission, email settings
+### Marketplace (/market)
+- URL Profile sub-categories, Base URL filtering (admin-curated)
+- Commission markup with fake higher strikethrough (price*1.25)
+- Character splash backgrounds on cards (agents/champions, 15% opacity)
+- Dynamic "Region|Rank|Skins" titles
 
-## Test Results: 37/37 passed (19 backend + 18 frontend = 100%)
+### Visual Galleries (Modal)
+- Valorant: Agent gallery + Weapon skin gallery (UUID-matched, tier colors)
+- LoL: Champion gallery (DataDragon icons) + Skin splash art gallery
+- Tracker links: Valorant Tracker, op.gg, u.gg (NO LZT exposure)
+
+### Admin (/admin)
+- Base Fetch URLs for All Valorant / All LoL
+- URL Profile management (paste LZT URLs)
+- Commission sliders, region, email settings
+
+## Test Results: 28/28 passed (14 backend + 14 frontend = 100%)
