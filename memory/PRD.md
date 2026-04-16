@@ -1,40 +1,47 @@
 # LZT Vault - Digital Game Account Marketplace
 
-## Original Problem Statement
-Build a premium digital game account marketplace with real LZT Market API integration, Google OAuth, and favorites.
-
 ## Architecture
 - **Frontend**: React + Tailwind CSS + Framer Motion + Lucide React
-- **Backend**: FastAPI (proxy to LZT Market API, auth, MongoDB caching)
-- **Database**: MongoDB (user sessions, API response cache with TTL)
-- **Auth**: Emergent-managed Google OAuth
-- **External API**: LZT Market (https://prod-api.lzt.market)
+- **Backend**: FastAPI (LZT proxy, auth, admin settings, favorites, skin proxy)
+- **Database**: MongoDB (sessions, cache with TTL, admin settings, favorites)
+- **Auth**: Emergent Google OAuth (first login becomes admin)
+- **External APIs**: LZT Market (prod-api.lzt.market), Valorant-API (valorant-api.com)
 
-## What's Been Implemented (Feb 2026)
-### Phase 1 - MVP
-- [x] Mock data prototype with 28 Valorant accounts
-- [x] Dashboard, filter sidebar, product cards, detail modal
-- [x] Premium dark mode gaming aesthetic
+## Implemented Features (Phase 3 - Current)
+### Core Marketplace
+- [x] Real LZT Market API with server-side MongoDB caching (5min search, 15min items)
+- [x] Only Valorant + League of Legends categories
+- [x] 100% commission markup (configurable per-category via Admin)
+- [x] Default EU region filter (configurable via Admin)
+- [x] Data-rich cards: dynamic "Region|Rank|Skins" titles, stat badges
+- [x] Commission prices with strikethrough original
 
-### Phase 2 - Real API + Auth (Current)
-- [x] Real LZT Market API integration via backend proxy
-- [x] Multi-category support (Valorant, Steam, Fortnite, Genshin/HSR, All)
-- [x] Server-side MongoDB caching (5min search, 15min items)
-- [x] Emergent Google OAuth (session exchange, /me, logout)
-- [x] Favorites in localStorage
-- [x] Category tabs, pagination (895+ pages)
-- [x] Price, sort, origin, region, currency filters
-- [x] Search by title
-- [x] Real account details in modal (rank, level, VP, skins, etc.)
-- [x] All 27+ features tested and passing (100% success rate)
+### Admin Dashboard (/admin)
+- [x] Default fetch region selector
+- [x] Per-category commission slider (0-300%)
+- [x] Admin email management
+- [x] Protected by Google OAuth + admin email check
 
-## Prioritized Backlog
-### P1
-- Advanced Valorant-specific filters (rank range, min skins, knife filter)
-- Account comparison feature (side-by-side)
-- Favorites sync to MongoDB for logged-in users
+### Skin Gallery
+- [x] Real Valorant weapon skin images from valorant-api.com
+- [x] Tier-colored masonry grid (Exclusive/Premium/Deluxe/Select)
+- [x] 24h cache in MongoDB
 
-### P2
-- Price alerts / watchlist
-- Seller reputation display
-- Account history / changelog
+### Account Comparison
+- [x] Select 2 accounts with compare buttons on cards
+- [x] Bottom bar showing selected items
+- [x] Side-by-side modal: Price, Region, Rank, Level, Skins, Knives, VP, RP, Agents
+
+### Advanced Filters
+- [x] Rank range slider (Unranked to Radiant)
+- [x] Min skins slider (0-200)
+- [x] Knife toggle
+- [x] Region, origin, price, sort, currency
+
+### Auth & Favorites
+- [x] Google OAuth via Emergent Auth
+- [x] Favorites: localStorage for guests, MongoDB sync for logged-in
+- [x] First login auto-sets admin email
+
+## Test Results
+- Phase 3: 38/38 tests passed (100% backend + frontend)
