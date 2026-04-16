@@ -3,28 +3,46 @@
 ## Architecture
 - Frontend: React + Tailwind CSS + Framer Motion
 - Backend: FastAPI + MongoDB + LZT Market API proxy
-- Auth: Emergent Google OAuth
+- Auth: Emergent Google OAuth (first login = admin)
 - External: LZT Market API, Valorant-API.com
 
+## Routes
+- / → Landing page (hero, features, CTAs)
+- /market → Marketplace dashboard (filters, cards, modals)
+- /admin → Admin settings (region, commission, email)
+- /admin/sync-settings → LZT API parameter config (3-column layout)
+
 ## All Implemented Features
-### Marketplace (/)
-- Real LZT data, Valorant + LoL categories, commission markup, dynamic cards
-- Skin gallery with real Valorant weapon images from valorant-api.com
-- Account comparison (2 side-by-side), favorites sync, pagination
-- Advanced filters: rank range, min skins, knife toggle, region, origin
+### Landing Page (NEW)
+- Premium hero with "Curated for You" heading
+- Live API status pill, stat pills (35K+, Real, 24/7)
+- 6 feature cards, bottom CTA section
 
-### Admin Panel (/admin)
-- Default region, per-category commission sliders, admin email config
+### Marketplace (/market)
+- Real LZT data, Valorant + LoL categories
+- Commission markup (100% default, configurable per-category)
+- Dynamic cards: "Region|Rank|Skins" format
+- LoL cards: Crown icon, champion count badge, region, rank
+- Valorant cards: rank color, knives badge, skin count
 
-### Sync Settings (/admin/sync-settings) ← NEW
-- Exact 1:1 clone of LZT Market advanced filtering layout
-- 3-column layout: General | Valorant | League of Legends
-- All form values saved to MongoDB fetch_settings collection
-- Maps directly to LZT API query parameters
-- Includes: origins, country, email/phone toggles, email type/domain/provider,
-  sold before checkboxes, rank ranges, skins, knives, VP, RP, inventory, agents,
-  LoL champions, blue/orange/mythic essence, riot points
+### Real Skin Inventory (FIXED)
+- Parses valorantInventory.WeaponSkins UUIDs from LZT API
+- Matches against 1,287 skins from valorant-api.com by UUID
+- NO randomization - only shows actual account skins
+- Loads partial from search, then full from item detail
+
+### LoL Dynamic Display (FIXED)
+- Cards: lol_level, lol_skin_count, lol_champion_count, lol_rank
+- Modal: Crown rank, Champions stat, Blue/Orange/Mythic Essence, RP
+- Client-side filter: riot_lol_level > 0 for LoL tab
+
+### Admin Session (FIXED)
+- is_admin returned in POST /api/auth/session response
+- Old sessions cleaned on new login (delete_many)
+- Cookie: samesite=none, secure=true for HTTPS
+- First login auto-sets admin email
 
 ## Test Results
-- Phase 4: 34/34 tests passed (15 backend + 19 frontend = 100%)
-- Cumulative: All phases passing
+- Backend: 6/6 API tests passing
+- Frontend: 6/6 Playwright tests passing
+- All screenshots verified visually
