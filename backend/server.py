@@ -41,6 +41,7 @@ DEFAULT_SETTINGS = {
     "default_region": "eu",
     "commission": {"valorant": 100, "lol": 100},
     "admin_email": ADMIN_EMAIL,
+    "base_urls": {"valorant": "", "lol": ""},
 }
 
 # ======================== HELPERS ========================
@@ -157,7 +158,7 @@ async def update_admin_settings(request: Request):
     await check_admin(request)
     body = await request.json()
     update = {}
-    for k in ("default_region", "commission", "admin_email"):
+    for k in ("default_region", "commission", "admin_email", "base_urls"):
         if k in body: update[k] = body[k]
     if update:
         await db.admin_settings.update_one({"settings_id": "global"}, {"$set": update}, upsert=True)
@@ -315,7 +316,7 @@ async def remove_favorite(item_id: int, request: Request):
     doc = await db.favorites.find_one({"user_id": user["user_id"]}, {"_id": 0})
     return {"items": doc.get("items", []) if doc else []}
 
-# ======================== VALORANT SKINS ========================
+# ======================== VALORANT SKINS + AGENTS ========================
 
 @api_router.get("/valorant/skins")
 async def get_valorant_skins():
@@ -343,6 +344,45 @@ async def get_valorant_skins():
         logger.error(f"Valorant API error: {e}")
         raise HTTPException(status_code=502, detail="Failed to fetch Valorant skin data")
 
+@api_router.get("/valorant/agents")
+async def get_valorant_agents():
+    cached = await db.lzt_cache.find_one({"cache_key": "valorant_agents"}, {"_id": 0})
+    if cached and cached.get("data"):
+        return cached["data"]
+    try:
+        resp = await val_http.get("https://valorant-api.com/v1/agents?isPlayableCharacter=true&language=en-US")
+        resp.raise_for_status()
+        agents = [{"uuid": a["uuid"], "displayName": a["displayName"], "displayIcon": a.get("displayIcon"), "fullPortrait": a.get("fullPortrait"), "background": a.get("background"), "bustPortrait": a.get("bustPortrait")} for a in resp.json().get("data", []) if a.get("displayIcon")]
+        result = {"agents": agents}
+        ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SKINS)
+        await db.lzt_cache.update_one({"cache_key": "valorant_agents"}, {"$set": {"cache_key": "valorant_agents", "data": result, "expires_at": ea}}, upsert=True)
+        return result
+    except Exception as e:
+        logger.error(f"Valorant agents error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch agents")
+
+@api_router.get("/lol/champions")
+async def get_lol_champions():
+    cached = await db.lzt_cache.find_one({"cache_key": "lol_champions"}, {"_id": 0})
+    if cached and cached.get("data"):
+        return cached["data"]
+    try:
+        ver_resp = await val_http.get("https://ddragon.leagueoflegends.com/api/versions.json")
+        ver = ver_resp.json()[0]
+        resp = await val_http.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/champion.json")
+        resp.raise_for_status()
+        raw = resp.json().get("data", {})
+        champs = {}
+        for name, data in raw.items():
+            champs[data["key"]] = {"id": name, "name": data["name"], "icon": f"https://ddragon.leagueoflegends.com/cdn/{ver}/img/champion/{name}.png", "splash": f"https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{name}_0.jpg"}
+        result = {"champions": champs, "version": ver}
+        ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SKINS)
+        await db.lzt_cache.update_one({"cache_key": "lol_champions"}, {"$set": {"cache_key": "lol_champions", "data": result, "expires_at": ea}}, upsert=True)
+        return result
+    except Exception as e:
+        logger.error(f"LoL champions error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch champions")
+
 # ======================== LZT MARKET (generic fallback) ========================
 
 @api_router.get("/market/search/{category}")
@@ -350,17 +390,35 @@ async def search_market(category: str, request: Request):
     if category not in ("valorant", "lol"):
         raise HTTPException(status_code=400, detail=f"Unsupported category: {category}")
     settings = await get_settings()
-    params = dict(request.query_params)
+    # Start with base URL params if configured
+    base_urls = settings.get("base_urls", {})
+    base_url_str = base_urls.get(category, "")
+    if base_url_str:
+        base_parsed = parse_lzt_url(base_url_str)
+        params = dict(base_parsed.get("params", {}))
+    else:
+        params = {}
+    # Override/merge with request query params
+    for k, v in request.query_params.items():
+        params[k] = v
     if "currency" not in params: params["currency"] = "usd"
-    cache_key = f"search:{category}:{str(sorted(params.items()))}"
+    # Flatten list params for cache key
+    cache_key = f"search:{category}:{str(sorted(str(params).encode()))}"
     cached = await db.lzt_cache.find_one({"cache_key": cache_key}, {"_id": 0})
     if cached and cached.get("data"):
         result = apply_commission(cached["data"], category, settings)
         result["default_region"] = settings.get("default_region", "all")
         return result
     url = f"{LZT_BASE_URL}/riot"
+    # Flatten list params for httpx
+    flat_params = []
+    for k, v in params.items():
+        if isinstance(v, list):
+            for item in v: flat_params.append((k, item))
+        else:
+            flat_params.append((k, v))
     try:
-        resp = await http_client.get(url, params=params)
+        resp = await http_client.get(url, params=flat_params)
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as e:
@@ -379,8 +437,12 @@ def apply_commission(data, category, settings):
     pct = settings.get("commission", {}).get(category, 100) / 100.0
     for item in data.get("items", []):
         original = item.get("price", 0)
-        item["original_price"] = original
-        item["price"] = round(original * (1 + pct), 2)
+        final_price = round(original * (1 + pct), 2)
+        # NEVER expose base price. Create fake "compare-at" price (25% above final)
+        item["price"] = final_price
+        item["compare_price"] = round(final_price * 1.25, 2)
+        # Remove any trace of original
+        item.pop("original_price", None)
     return data
 
 @api_router.get("/market/item/{item_id}")
@@ -407,8 +469,10 @@ async def get_market_item(item_id: int, request: Request):
 def apply_item_commission(data):
     item = data.get("item", data)
     if isinstance(item, dict) and "price" in item:
-        item["original_price"] = item["price"]
-        item["price"] = round(item["price"] * 2, 2)
+        final_price = round(item["price"] * 2, 2)
+        item["price"] = final_price
+        item["compare_price"] = round(final_price * 1.25, 2)
+        item.pop("original_price", None)
     return data
 
 # ======================== HEALTH ========================

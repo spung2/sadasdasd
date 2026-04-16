@@ -41,7 +41,7 @@ export default function AdminDashboard() {
   const handleSave = async () => {
     setSaving(true); setSuccess(false);
     try {
-      const updated = await updateAdminSettings({ default_region: localSettings.default_region, commission: localSettings.commission, admin_email: localSettings.admin_email });
+      const updated = await updateAdminSettings({ default_region: localSettings.default_region, commission: localSettings.commission, admin_email: localSettings.admin_email, base_urls: localSettings.base_urls });
       setSettings(updated); setLocalSettings(updated); setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (e) { setError(e.message); }
@@ -87,6 +87,29 @@ export default function AdminDashboard() {
       {success && <div className="max-w-5xl mx-auto px-6 mt-4"><div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">Saved!</div></div>}
 
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+        {/* ===== BASE/DEFAULT FETCH URLs ===== */}
+        <div className="glass rounded-xl p-6 space-y-5">
+          <div className="flex items-center gap-3">
+            <Globe className="w-5 h-5 text-valorant" />
+            <h2 className="text-base font-heading font-bold text-white">Base Fetch URLs</h2>
+          </div>
+          <p className="text-xs text-zinc-500">Set the default LZT Market URL for the "All" category view. This ensures users browsing the main categories only see curated accounts (e.g., no phishing).</p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1 block">All Valorant (Base URL)</label>
+              <input data-testid="base-url-valorant" type="text" placeholder="https://lzt.market/riot?not_origin[]=phishing&..." value={localSettings?.base_urls?.valorant || ''} onChange={e => setLocalSettings(p => ({...p, base_urls: {...(p.base_urls||{}), valorant: e.target.value}}))}
+                className="w-full px-3 py-2.5 bg-zinc-900/80 border border-white/10 rounded-lg text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-valorant/50 font-mono text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1 block">All League of Legends (Base URL)</label>
+              <input data-testid="base-url-lol" type="text" placeholder="https://lzt.market/riot?not_origin[]=phishing&..." value={localSettings?.base_urls?.lol || ''} onChange={e => setLocalSettings(p => ({...p, base_urls: {...(p.base_urls||{}), lol: e.target.value}}))}
+                className="w-full px-3 py-2.5 bg-zinc-900/80 border border-white/10 rounded-lg text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-valorant/50 font-mono text-xs" />
+            </div>
+          </div>
+        </div>
+
+        <Separator className="bg-white/5" />
+
         {/* ===== URL PROFILES ===== */}
         <div className="glass rounded-xl p-6 space-y-5">
           <div className="flex items-center gap-3">
