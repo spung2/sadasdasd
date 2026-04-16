@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { X, ExternalLink, ShieldCheck, ShieldAlert, Crosshair, Sparkles, Star, Clock, TrendingUp, Swords, Gem, Eye, Heart, Gamepad2, Globe, Users, Tag, Loader2 } from 'lucide-react';
+import { X, ExternalLink, ShieldCheck, ShieldAlert, Crosshair, Sparkles, Star, Clock, TrendingUp, Swords, Gem, Eye, Heart, Gamepad2, Globe, Users, Tag, Loader2, Crown, Trophy, Coins, CircleDollarSign } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { getValorantRankName, getRankColorFromInt, getOriginLabel, getOriginColor, isLocalFavorite, toggleLocalFavorite, fetchMarketItem, fetchValorantSkins, getCurrencySymbol, addServerFavorite, removeServerFavorite } from '@/data/api';
 
 const TIER_COLORS = { Deluxe:'from-emerald-800 to-emerald-950 border-emerald-500/30', Premium:'from-purple-800 to-purple-950 border-purple-500/30', Select:'from-zinc-700 to-zinc-800 border-zinc-500/30', Ultra:'from-amber-800 to-amber-950 border-amber-500/30', Exclusive:'from-red-800 to-red-950 border-valorant/30', Standard:'from-zinc-800 to-zinc-900 border-zinc-600/30' };
+const LOL_RANK_COLORS = { IRON:'#8c8c8c', BRONZE:'#b87333', SILVER:'#c0c0c0', GOLD:'#ffd700', PLATINUM:'#00bcd4', EMERALD:'#00e676', DIAMOND:'#b388ff', MASTER:'#9d4dbb', GRANDMASTER:'#ff4655', CHALLENGER:'#ffe57f' };
 
 function StatBox({ icon: Icon, label, value, color }) {
   return (
@@ -33,67 +34,81 @@ function SkinGalleryCard({ skin }) {
   );
 }
 
+function getLolRankColor(rank) {
+  if (!rank) return '#a1a1aa';
+  const tier = rank.split(' ')[0].toUpperCase();
+  return LOL_RANK_COLORS[tier] || '#a1a1aa';
+}
+
 export default function LztPreviewModal({ product, category, onClose }) {
   const [fav, setFav] = useState(isLocalFavorite(product.item_id));
   const [detailedItem, setDetailedItem] = useState(null);
-  const [matchedSkins, setMatchedSkins] = useState([]);
+  const [allSkins, setAllSkins] = useState([]);
   const [skinsLoading, setSkinsLoading] = useState(true);
 
   useEffect(() => {
     fetchMarketItem(product.item_id).then(d => { if (d?.item) setDetailedItem(d.item); }).catch(() => {});
   }, [product.item_id]);
 
-  // Fetch valorant skins and match with item title
+  // Fetch all Valorant skins for UUID matching
   useEffect(() => {
     if (category !== 'valorant') { setSkinsLoading(false); return; }
-    (async () => {
-      try {
-        const { skins } = await fetchValorantSkins();
-        const item = detailedItem || product;
-        const title = (item.title || '').toLowerCase();
-        // Try to match skin names from the title
-        const matched = skins.filter(s => {
-          const name = s.displayName.toLowerCase();
-          // Check if any part of the skin name appears in the title
-          const parts = name.split(' ');
-          return parts.length > 1 && parts.some(p => p.length > 3 && title.includes(p));
-        }).slice(0, 20);
-        // If no matches from title, show random premium skins proportional to skin count
-        if (matched.length === 0) {
-          const skinCount = item.riot_valorant_skin_count || 0;
-          const showCount = Math.min(skinCount, 16);
-          const premium = skins.filter(s => s.tier !== 'Standard' && s.tier !== 'Select');
-          const shuffled = [...premium].sort(() => Math.random() - 0.5);
-          setMatchedSkins(shuffled.slice(0, showCount));
-        } else {
-          setMatchedSkins(matched);
-        }
-      } catch { }
-      finally { setSkinsLoading(false); }
-    })();
-  }, [product, detailedItem, category]);
+    fetchValorantSkins().then(d => setAllSkins(d.skins || [])).catch(() => {}).finally(() => setSkinsLoading(false));
+  }, [category]);
 
   const item = detailedItem || product;
   const isVal = category === 'valorant';
-  const rankInt = item.riot_valorant_rank || 0;
-  const rankName = item.valorantRankTitle || getValorantRankName(rankInt);
-  const rankColor = getRankColorFromInt(rankInt);
-  const region = item.riot_valorant_region || '';
+  const isLol = category === 'lol';
   const origin = item.item_origin || '';
-  const skinCount = item.riot_valorant_skin_count || 0;
-  const level = item.riot_valorant_level || 0;
+  const cs = getCurrencySymbol(item.price_currency);
+  const publishedDate = item.published_date ? new Date(item.published_date * 1000) : null;
+  const lztUrl = `https://lzt.market/${product.item_id}/`;
+
+  // Valorant data
+  const valRankInt = item.riot_valorant_rank || 0;
+  const valRankName = item.valorantRankTitle || getValorantRankName(valRankInt);
+  const valRankColor = getRankColorFromInt(valRankInt);
+  const valRegion = item.riot_valorant_region || '';
+  const valSkinCount = item.riot_valorant_skin_count || 0;
+  const valLevel = item.riot_valorant_level || 0;
   const vp = item.riot_valorant_wallet_vp || 0;
   const rp = item.riot_valorant_wallet_rp || 0;
   const agentCount = item.riot_valorant_agent_count || 0;
   const knifeCount = item.riot_valorant_knife_count || 0;
-  const cs = getCurrencySymbol(item.price_currency);
-  const publishedDate = item.published_date ? new Date(item.published_date * 1000) : null;
   const lastActivity = item.riot_last_activity ? new Date(item.riot_last_activity * 1000) : null;
   const daysAgo = lastActivity ? Math.floor((Date.now() - lastActivity.getTime()) / (1000*60*60*24)) : null;
   const isRecentlyActive = daysAgo !== null && daysAgo < 7;
-  const feedbackData = typeof item.feedback_data === 'string' ? JSON.parse(item.feedback_data||'{}') : (item.feedback_data||{});
+
+  // LoL data
+  const lolRegion = item.lolRegionPhrase || item.riot_lol_region || '';
+  const lolSkinCount = item.riot_lol_skin_count || 0;
+  const lolChampCount = item.riot_lol_champion_count || 0;
+  const lolLevel = item.riot_lol_level || 0;
+  const lolRank = item.riot_lol_rank || 'Unranked';
+  const lolRankColor = getLolRankColor(lolRank);
+  const lolBlue = item.riot_lol_wallet_blue || 0;
+  const lolOrange = item.riot_lol_wallet_orange || 0;
+  const lolMythic = item.riot_lol_wallet_mythic || 0;
+  const lolRiot = item.riot_lol_wallet_riot || 0;
+
+  // Generic
+  const region = isVal ? valRegion : lolRegion;
+  const rankName = isVal ? valRankName : lolRank;
+  const rankColor = isVal ? valRankColor : lolRankColor;
+  const skinCount = isVal ? valSkinCount : lolSkinCount;
+  const level = isVal ? valLevel : lolLevel;
+
+  const feedbackData = typeof item.feedback_data === 'string' ? JSON.parse(item.feedback_data || '{}') : (item.feedback_data || {});
   const catFb = feedbackData[String(item.category_id)] || feedbackData['13'] || {};
-  const lztUrl = `https://lzt.market/${product.item_id}/`;
+
+  // FIX #2: Match ACTUAL inventory skins by UUID — NO randomization
+  const matchedSkins = useMemo(() => {
+    if (!isVal || allSkins.length === 0) return [];
+    const inventory = item.valorantInventory || detailedItem?.valorantInventory;
+    if (!inventory?.WeaponSkins) return [];
+    const inventoryUuids = new Set(Object.values(inventory.WeaponSkins));
+    return allSkins.filter(s => inventoryUuids.has(s.uuid));
+  }, [item, detailedItem, allSkins, isVal]);
 
   const handleFav = () => {
     const newFavs = toggleLocalFavorite(product.item_id);
@@ -121,7 +136,7 @@ export default function LztPreviewModal({ product, category, onClose }) {
                     {origin && <Badge className={`text-[10px] border ${getOriginColor(origin)}`}>{getOriginLabel(origin)}</Badge>}
                     {region && <Badge className="text-[10px] bg-zinc-800/80 text-zinc-300 border-zinc-700/50">{region}</Badge>}
                     <Badge className="text-[10px] bg-zinc-800/80 text-zinc-300 border-zinc-700/50">ID: {product.item_id}</Badge>
-                    {item.nsb===1 && <Badge className="text-[10px] bg-electric/10 text-electric border-electric/30">NSB</Badge>}
+                    {item.nsb === 1 && <Badge className="text-[10px] bg-electric/10 text-electric border-electric/30">NSB</Badge>}
                   </div>
                   <h2 className="text-xl sm:text-2xl font-heading font-bold text-white truncate">{region} | {rankName} | {skinCount} Skins</h2>
                   <p className="text-xs text-zinc-500 mt-0.5 truncate">{item.title}</p>
@@ -146,39 +161,57 @@ export default function LztPreviewModal({ product, category, onClose }) {
               <a data-testid="view-original-btn" href={lztUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 px-6 py-3.5 bg-zinc-800/80 border border-white/10 text-zinc-300 text-sm rounded-lg hover:bg-zinc-800 hover:text-white transition-all"><ExternalLink className="w-4 h-4" />View on LZT</a>
             </div>
 
-            {/* Security */}
-            {isVal && (
-              <div data-testid="security-banner" className={`flex items-center gap-3 p-4 rounded-xl border-l-4 ${isRecentlyActive ? 'bg-amber-500/5 border-amber-500 text-amber-400' : 'bg-emerald-500/5 border-emerald-500 text-emerald-400'}`}>
-                {isRecentlyActive ? <ShieldAlert className="w-5 h-5 shrink-0" /> : <ShieldCheck className="w-5 h-5 shrink-0" />}
-                <div><p className="text-sm font-semibold">{isRecentlyActive ? 'Recently Active' : 'Account Safe'}</p><p className="text-xs opacity-70 mt-0.5">{isRecentlyActive ? `Active ${daysAgo===0?'today':`${daysAgo}d ago`}` : daysAgo!==null ? `Inactive ${daysAgo}d` : 'Status nominal'}</p></div>
-              </div>
-            )}
+            {/* Security Banner */}
+            <div data-testid="security-banner" className={`flex items-center gap-3 p-4 rounded-xl border-l-4 ${isRecentlyActive ? 'bg-amber-500/5 border-amber-500 text-amber-400' : 'bg-emerald-500/5 border-emerald-500 text-emerald-400'}`}>
+              {isRecentlyActive ? <ShieldAlert className="w-5 h-5 shrink-0" /> : <ShieldCheck className="w-5 h-5 shrink-0" />}
+              <div><p className="text-sm font-semibold">{isRecentlyActive ? 'Recently Active' : 'Account Safe'}</p><p className="text-xs opacity-70 mt-0.5">{isRecentlyActive ? `Active ${daysAgo===0?'today':`${daysAgo}d ago`}` : daysAgo!==null ? `Inactive ${daysAgo}d` : 'Status nominal'}</p></div>
+            </div>
 
-            {/* Stats */}
+            {/* ===== VALORANT STATS ===== */}
             {isVal && (
               <>
                 <div data-testid="stat-grid" className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <StatBox icon={Crosshair} label="Rank" value={rankName} color={rankColor} />
-                  <StatBox icon={TrendingUp} label="Level" value={level} color="#00e5ff" />
+                  <StatBox icon={Crosshair} label="Rank" value={valRankName} color={valRankColor} />
+                  <StatBox icon={TrendingUp} label="Level" value={valLevel} color="#00e5ff" />
                   <StatBox icon={Gem} label="VP" value={vp.toLocaleString()} color="#a78bfa" />
                   <StatBox icon={Sparkles} label="Radianite" value={rp} color="#fbbf24" />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Gamepad2 className="w-4 h-4 text-zinc-500" /><div><p className="text-xs text-zinc-500">Agents</p><p className="text-sm font-semibold text-white">{agentCount}</p></div></div>
                   <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Swords className="w-4 h-4 text-zinc-500" /><div><p className="text-xs text-zinc-500">Knives</p><p className="text-sm font-semibold text-white">{knifeCount}</p></div></div>
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Sparkles className="w-4 h-4 text-zinc-500" /><div><p className="text-xs text-zinc-500">Skins</p><p className="text-sm font-semibold text-white">{skinCount}</p></div></div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Sparkles className="w-4 h-4 text-zinc-500" /><div><p className="text-xs text-zinc-500">Skins</p><p className="text-sm font-semibold text-white">{valSkinCount}</p></div></div>
+                </div>
+              </>
+            )}
+
+            {/* ===== LOL STATS ===== */}
+            {isLol && (
+              <>
+                <div data-testid="stat-grid" className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <StatBox icon={Crown} label="Rank" value={lolRank} color={lolRankColor} />
+                  <StatBox icon={TrendingUp} label="Level" value={lolLevel} color="#00e5ff" />
+                  <StatBox icon={Trophy} label="Champions" value={lolChampCount} color="#a78bfa" />
+                  <StatBox icon={Sparkles} label="Skins" value={lolSkinCount} color="#fbbf24" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Coins className="w-4 h-4 text-blue-400" /><div><p className="text-xs text-zinc-500">Blue Essence</p><p className="text-sm font-semibold text-white">{lolBlue.toLocaleString()}</p></div></div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Coins className="w-4 h-4 text-orange-400" /><div><p className="text-xs text-zinc-500">Orange Essence</p><p className="text-sm font-semibold text-white">{lolOrange.toLocaleString()}</p></div></div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><Gem className="w-4 h-4 text-purple-400" /><div><p className="text-xs text-zinc-500">Mythic Essence</p><p className="text-sm font-semibold text-white">{lolMythic}</p></div></div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/60 border border-white/5"><CircleDollarSign className="w-4 h-4 text-amber-400" /><div><p className="text-xs text-zinc-500">Riot Points</p><p className="text-sm font-semibold text-white">{lolRiot}</p></div></div>
                 </div>
               </>
             )}
 
             <Separator className="bg-white/5" />
 
-            {/* Skin Gallery */}
-            {isVal && skinCount > 0 && (
+            {/* Skin Gallery - REAL INVENTORY ONLY */}
+            {isVal && (
               <div data-testid="skin-gallery">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-heading font-bold text-white uppercase tracking-wider">Skin Gallery</h3>
-                  <span className="text-xs text-zinc-500">{matchedSkins.length} previewed / {skinCount} total</span>
+                  <h3 className="text-sm font-heading font-bold text-white uppercase tracking-wider">Skin Inventory</h3>
+                  <span className="text-xs text-zinc-500">
+                    {skinsLoading ? 'Loading...' : `${matchedSkins.length} matched / ${valSkinCount} total`}
+                  </span>
                 </div>
                 {skinsLoading ? (
                   <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 text-zinc-500 animate-spin" /></div>
@@ -187,7 +220,9 @@ export default function LztPreviewModal({ product, category, onClose }) {
                     {matchedSkins.map((s, i) => <SkinGalleryCard key={`${s.uuid}-${i}`} skin={s} />)}
                   </div>
                 ) : (
-                  <p className="text-xs text-zinc-600 text-center py-4">No skin previews available for this account.</p>
+                  <p className="text-xs text-zinc-600 text-center py-4">
+                    {detailedItem ? 'No inventory data available for this account.' : 'Loading inventory details...'}
+                  </p>
                 )}
               </div>
             )}

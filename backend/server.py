@@ -33,7 +33,7 @@ val_http = httpx.AsyncClient(timeout=30.0)
 EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 CACHE_TTL_SEARCH = 300
 CACHE_TTL_ITEM = 900
-CACHE_TTL_SKINS = 86400  # 24h
+CACHE_TTL_SKINS = 86400
 
 DEFAULT_SETTINGS = {
     "settings_id": "global",
@@ -43,6 +43,13 @@ DEFAULT_SETTINGS = {
 }
 
 # ======================== AUTH ========================
+
+async def get_settings():
+    s = await db.admin_settings.find_one({"settings_id": "global"}, {"_id": 0})
+    if not s:
+        await db.admin_settings.insert_one(dict(DEFAULT_SETTINGS))
+        return dict(DEFAULT_SETTINGS)
+    return s
 
 @api_router.post("/auth/session")
 async def exchange_session(request: Request, response: Response):
@@ -55,65 +62,98 @@ async def exchange_session(request: Request, response: Response):
     if ar.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid session")
     ad = ar.json()
-    email, name, picture, session_token = ad.get("email"), ad.get("name",""), ad.get("picture",""), ad.get("session_token","")
+    email = ad.get("email")
+    name = ad.get("name", "")
+    picture = ad.get("picture", "")
+    session_token = ad.get("session_token", "")
+
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         user_id = existing["user_id"]
         await db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture}})
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture, "created_at": datetime.now(timezone.utc).isoformat()})
-    # If no admin email set yet, set first user as admin
+        await db.users.insert_one({
+            "user_id": user_id, "email": email, "name": name,
+            "picture": picture, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    # Auto-set first real user as admin if no admin_email is set
     settings = await get_settings()
     if not settings.get("admin_email"):
-        await db.admin_settings.update_one({"settings_id": "global"}, {"$set": {"admin_email": email}}, upsert=True)
+        await db.admin_settings.update_one(
+            {"settings_id": "global"}, {"$set": {"admin_email": email}}, upsert=True
+        )
+
+    # Clean old sessions for this user, then create new one
+    await db.user_sessions.delete_many({"user_id": user_id})
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.insert_one({"user_id": user_id, "session_token": session_token, "expires_at": expires_at.isoformat(), "created_at": datetime.now(timezone.utc).isoformat()})
-    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="none", path="/", max_age=7*24*3600)
+    await db.user_sessions.insert_one({
+        "user_id": user_id, "session_token": session_token,
+        "expires_at": expires_at.isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    # Set cookie - samesite=none + secure for cross-origin HTTPS
+    response.set_cookie(
+        key="session_token", value=session_token,
+        httponly=True, secure=True, samesite="none",
+        path="/", max_age=7 * 24 * 3600
+    )
+
+    # Return user WITH is_admin flag immediately
+    settings = await get_settings()
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    user["is_admin"] = (user.get("email") == settings.get("admin_email"))
     return user
+
 
 async def get_current_user(request: Request) -> Optional[dict]:
     token = request.cookies.get("session_token")
     if not token:
         ah = request.headers.get("Authorization", "")
-        if ah.startswith("Bearer "): token = ah[7:]
-    if not token: return None
+        if ah.startswith("Bearer "):
+            token = ah[7:]
+    if not token:
+        return None
     session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if not session: return None
+    if not session:
+        return None
     ea = session.get("expires_at", "")
-    if isinstance(ea, str): ea = datetime.fromisoformat(ea)
-    if ea.tzinfo is None: ea = ea.replace(tzinfo=timezone.utc)
-    if ea < datetime.now(timezone.utc): return None
+    if isinstance(ea, str):
+        ea = datetime.fromisoformat(ea)
+    if ea.tzinfo is None:
+        ea = ea.replace(tzinfo=timezone.utc)
+    if ea < datetime.now(timezone.utc):
+        return None
     return await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+
 
 @api_router.get("/auth/me")
 async def get_me(request: Request):
     user = await get_current_user(request)
-    if not user: raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     settings = await get_settings()
-    user["is_admin"] = user.get("email") == settings.get("admin_email")
+    user["is_admin"] = (user.get("email") == settings.get("admin_email"))
     return user
+
 
 @api_router.post("/auth/logout")
 async def logout_user(request: Request, response: Response):
     token = request.cookies.get("session_token")
-    if token: await db.user_sessions.delete_one({"session_token": token})
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie(key="session_token", path="/", samesite="none", secure=True, httponly=True)
     return {"message": "Logged out"}
 
-# ======================== ADMIN SETTINGS ========================
 
-async def get_settings():
-    s = await db.admin_settings.find_one({"settings_id": "global"}, {"_id": 0})
-    if not s:
-        await db.admin_settings.insert_one(dict(DEFAULT_SETTINGS))
-        return dict(DEFAULT_SETTINGS)
-    return s
+# ======================== ADMIN SETTINGS ========================
 
 async def check_admin(request: Request):
     user = await get_current_user(request)
-    if not user: raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     settings = await get_settings()
     if user.get("email") != settings.get("admin_email"):
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -136,45 +176,13 @@ async def update_admin_settings(request: Request):
         await db.admin_settings.update_one({"settings_id": "global"}, {"$set": update}, upsert=True)
     return await get_settings()
 
-
-# ======================== FETCH SETTINGS (Sync Engine Config) ========================
+# ======================== FETCH SETTINGS ========================
 
 DEFAULT_FETCH_SETTINGS = {
     "settings_id": "fetch_config",
-    "general": {
-        "pmin": "", "pmax": "", "title": "",
-        "origin": [], "country": "", "not_country": "",
-        "daybreak": "", "email": "nomatter", "tel": "nomatter",
-        "email_type": [], "item_domain": "", "not_item_domain": "",
-        "email_provider": "", "not_email_provider": "",
-        "nsb": False, "sb": False, "nsb_by_me": False, "sb_by_me": False,
-    },
-    "valorant": {
-        "weaponSkin": "", "knife": False,
-        "valorant_knife_min": "", "valorant_knife_max": "",
-        "buddy": "", "agent": "",
-        "valorant_region": [], "valorant_not_region": "",
-        "rmin": "", "rmax": "",
-        "previous_rmin": "", "previous_rmax": "",
-        "last_rmin": "", "last_rmax": "",
-        "valorant_smin": "", "valorant_smax": "",
-        "valorant_level_min": "", "valorant_level_max": "",
-        "vp_min": "", "vp_max": "",
-        "inv_min": "", "inv_max": "",
-        "amin": "", "amax": "",
-    },
-    "lol": {
-        "skin": "", "champion": "",
-        "lol_region": [], "lol_not_region": "",
-        "lol_level_min": "", "lol_level_max": "",
-        "win_rate_min": "", "win_rate_max": "",
-        "lol_smin": "", "lol_smax": "",
-        "champion_min": "", "champion_max": "",
-        "blue_min": "", "blue_max": "",
-        "orange_min": "", "orange_max": "",
-        "mythic_min": "", "mythic_max": "",
-        "riot_min": "", "riot_max": "",
-    },
+    "general": {"pmin":"","pmax":"","title":"","origin":[],"country":"","not_country":"","daybreak":"","email":"nomatter","tel":"nomatter","email_type":[],"item_domain":"","not_item_domain":"","email_provider":"","not_email_provider":"","nsb":False,"sb":False,"nsb_by_me":False,"sb_by_me":False},
+    "valorant": {"weaponSkin":"","knife":False,"valorant_knife_min":"","valorant_knife_max":"","buddy":"","agent":"","valorant_region":[],"valorant_not_region":"","rmin":"","rmax":"","previous_rmin":"","previous_rmax":"","last_rmin":"","last_rmax":"","valorant_smin":"","valorant_smax":"","valorant_level_min":"","valorant_level_max":"","vp_min":"","vp_max":"","inv_min":"","inv_max":"","amin":"","amax":""},
+    "lol": {"skin":"","champion":"","lol_region":[],"lol_not_region":"","lol_level_min":"","lol_level_max":"","win_rate_min":"","win_rate_max":"","lol_smin":"","lol_smax":"","champion_min":"","champion_max":"","blue_min":"","blue_max":"","orange_min":"","orange_max":"","mythic_min":"","mythic_max":"","riot_min":"","riot_max":""},
 }
 
 @api_router.get("/admin/fetch-settings")
@@ -191,18 +199,11 @@ async def update_fetch_settings(request: Request):
     await check_admin(request)
     body = await request.json()
     update = {}
-    if "general" in body: update["general"] = body["general"]
-    if "valorant" in body: update["valorant"] = body["valorant"]
-    if "lol" in body: update["lol"] = body["lol"]
+    for k in ("general", "valorant", "lol"):
+        if k in body: update[k] = body[k]
     if update:
-        await db.fetch_settings.update_one(
-            {"settings_id": "fetch_config"},
-            {"$set": update},
-            upsert=True
-        )
-    doc = await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
-    return doc
-
+        await db.fetch_settings.update_one({"settings_id": "fetch_config"}, {"$set": update}, upsert=True)
+    return await db.fetch_settings.find_one({"settings_id": "fetch_config"}, {"_id": 0})
 
 # ======================== FAVORITES ========================
 
@@ -215,7 +216,6 @@ async def get_favorites(request: Request):
 
 @api_router.post("/favorites/sync")
 async def sync_favorites(request: Request):
-    """Sync must be defined BEFORE {item_id} route to avoid route conflict"""
     user = await get_current_user(request)
     if not user: raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
@@ -253,7 +253,6 @@ async def get_valorant_skins():
         resp = await val_http.get("https://valorant-api.com/v1/weapons/skins?language=en-US")
         resp.raise_for_status()
         raw = resp.json()
-        # Also fetch content tiers
         tiers_resp = await val_http.get("https://valorant-api.com/v1/contenttiers")
         tiers_data = {}
         if tiers_resp.status_code == 200:
@@ -262,19 +261,17 @@ async def get_valorant_skins():
         skins = []
         for s in raw.get("data", []):
             if not s.get("displayIcon"): continue
-            skin = {
+            skins.append({
                 "uuid": s["uuid"],
                 "displayName": s["displayName"],
                 "displayIcon": s["displayIcon"],
                 "contentTierUuid": s.get("contentTierUuid"),
                 "tier": tiers_data.get(s.get("contentTierUuid"), {}).get("name", "Standard"),
                 "tierColor": tiers_data.get(s.get("contentTierUuid"), {}).get("color"),
-                "chromas": [{"displayName": c["displayName"], "fullRender": c.get("fullRender"), "swatch": c.get("swatch")} for c in (s.get("chromas") or []) if c.get("fullRender")],
-            }
-            skins.append(skin)
+            })
         result = {"skins": skins, "tiers": tiers_data}
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SKINS)
-        await db.lzt_cache.update_one({"cache_key": "valorant_skins_all"}, {"$set": {"cache_key": "valorant_skins_all", "data": result, "expires_at": expires_at}}, upsert=True)
+        ea = datetime.now(timezone.utc) + timedelta(seconds=CACHE_TTL_SKINS)
+        await db.lzt_cache.update_one({"cache_key": "valorant_skins_all"}, {"$set": {"cache_key": "valorant_skins_all", "data": result, "expires_at": ea}}, upsert=True)
         return result
     except Exception as e:
         logger.error(f"Valorant API error: {e}")
@@ -301,15 +298,11 @@ async def search_market(category: str, request: Request):
         raise HTTPException(status_code=400, detail=f"Unsupported category: {category}")
     settings = await get_settings()
     params = dict(request.query_params)
-    # Note: default_region is applied as a display filter, not sent to LZT API
-    # because LZT region param values don't match display values
-    # Ensure USD currency for commission calc
     if "currency" not in params:
         params["currency"] = "usd"
     cache_key = f"search:{category}:{str(sorted(params.items()))}"
     cached = await db.lzt_cache.find_one({"cache_key": cache_key}, {"_id": 0})
     if cached and cached.get("data"):
-        logger.info(f"Cache HIT for {category}")
         result = apply_commission(cached["data"], category, settings)
         result["default_region"] = settings.get("default_region", "all")
         return result
@@ -336,14 +329,11 @@ async def search_market(category: str, request: Request):
     return result
 
 def apply_commission(data, category, settings):
-    commission_map = settings.get("commission", {})
-    pct = commission_map.get(category, 100) / 100.0
-    items = data.get("items", [])
-    for item in items:
+    pct = settings.get("commission", {}).get(category, 100) / 100.0
+    for item in data.get("items", []):
         original = item.get("price", 0)
         item["original_price"] = original
         item["price"] = round(original * (1 + pct), 2)
-        item["commission_pct"] = commission_map.get(category, 100)
     return data
 
 @api_router.get("/market/item/{item_id}")
@@ -367,16 +357,11 @@ async def get_market_item(item_id: int, request: Request):
     except: pass
     return apply_item_commission(data)
 
-async def apply_item_commission_async(data):
-    settings = await get_settings()
-    return _apply_item_commission(data, settings)
-
 def apply_item_commission(data):
-    # sync version - uses default 100% since we can't await in sync context
     item = data.get("item", data)
     if isinstance(item, dict) and "price" in item:
         item["original_price"] = item["price"]
-        item["price"] = round(item["price"] * 2, 2)  # default 100% markup
+        item["price"] = round(item["price"] * 2, 2)
     return data
 
 # ======================== HEALTH ========================

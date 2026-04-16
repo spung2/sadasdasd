@@ -1,11 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { Crosshair, ShieldCheck, Flame, Store, LogOut, Settings } from 'lucide-react';
+import { Crosshair, Store, LogOut, Settings } from 'lucide-react';
 import { logout as apiLogout } from '@/data/api';
 
 export default function Navbar({ user, setUser }) {
   const navigate = useNavigate();
   const handleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
     const redirectUrl = window.location.origin + '/';
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };
@@ -24,7 +23,7 @@ export default function Navbar({ user, setUser }) {
           </div>
         </div>
         <div className="hidden md:flex items-center gap-1">
-          <button data-testid="nav-marketplace" onClick={() => navigate('/')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-white/5"><Store className="w-4 h-4" />Marketplace</button>
+          <button data-testid="nav-marketplace" onClick={() => navigate('/market')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-white/5"><Store className="w-4 h-4" />Marketplace</button>
           {user?.is_admin && <button data-testid="nav-admin" onClick={() => navigate('/admin')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]"><Settings className="w-4 h-4" />Admin</button>}
         </div>
         <div className="flex items-center gap-3">
@@ -38,8 +37,8 @@ export default function Navbar({ user, setUser }) {
                 {user.picture && <img src={user.picture} alt="" className="w-6 h-6 rounded-full" />}
                 <span className="text-xs text-zinc-300 font-medium hidden sm:inline max-w-[100px] truncate">{user.name || user.email}</span>
               </div>
-              {user.is_admin && <button data-testid="admin-btn" onClick={() => navigate('/admin')} className="p-2 text-amber-400 hover:text-amber-300 transition-colors md:hidden" title="Admin"><Settings className="w-4 h-4" /></button>}
-              <button data-testid="logout-btn" onClick={handleLogout} className="p-2 text-zinc-500 hover:text-white transition-colors" title="Sign out"><LogOut className="w-4 h-4" /></button>
+              {user.is_admin && <button data-testid="admin-btn" onClick={() => navigate('/admin')} className="p-2 text-amber-400 hover:text-amber-300 transition-colors md:hidden"><Settings className="w-4 h-4" /></button>}
+              <button data-testid="logout-btn" onClick={handleLogout} className="p-2 text-zinc-500 hover:text-white transition-colors"><LogOut className="w-4 h-4" /></button>
             </div>
           ) : (
             <button data-testid="sign-in-btn" onClick={handleLogin} className="px-4 py-2 text-sm font-semibold text-white bg-valorant/90 hover:bg-valorant rounded-lg transition-all hover:shadow-[0_0_20px_rgba(255,70,85,0.3)]">Sign In</button>

@@ -45,6 +45,12 @@ export default function Dashboard() {
       if (searchQuery.trim()) params.title = searchQuery.trim();
       const data = await fetchMarketSearch(category, params);
       let items = data.items || [];
+      // Filter by game type — /riot returns both Valorant and LoL mixed
+      if (category === 'valorant') {
+        items = items.filter(i => (i.riot_valorant_level || 0) > 0 || (i.riot_valorant_skin_count || 0) > 0);
+      } else if (category === 'lol') {
+        items = items.filter(i => (i.riot_lol_level || 0) > 0 || (i.riot_lol_champion_count || 0) > 0);
+      }
       // Apply client-side region filter from admin settings or user choice
       const adminRegion = data.default_region || 'all';
       const activeRegion = filters['valorant_region'] || adminRegion;

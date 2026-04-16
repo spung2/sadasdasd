@@ -10,38 +10,25 @@ export default function AuthCallback() {
   const processAuth = useCallback(async () => {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
-
     const hash = window.location.hash;
     const match = hash.match(/session_id=([^&]+)/);
-    if (!match) {
-      navigate('/', { replace: true });
-      return;
-    }
-
+    if (!match) { navigate('/market', { replace: true }); return; }
     try {
       const user = await exchangeSession(match[1]);
-      // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-      navigate('/', { replace: true, state: { user } });
+      navigate('/market', { replace: true, state: { user } });
     } catch (err) {
       setError('Authentication failed. Please try again.');
       setTimeout(() => navigate('/', { replace: true }), 3000);
     }
   }, [navigate]);
 
-  useEffect(() => {
-    processAuth();
-  }, [processAuth]);
+  useEffect(() => { processAuth(); }, [processAuth]);
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-400 text-sm">{error}</p>
-          <p className="text-zinc-500 text-xs mt-2">Redirecting...</p>
-        </div>
-      </div>
-    );
-  }
+  if (error) return (
+    <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+      <div className="text-center"><p className="text-red-400 text-sm">{error}</p><p className="text-zinc-500 text-xs mt-2">Redirecting...</p></div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
